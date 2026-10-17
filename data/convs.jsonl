@@ -1,0 +1,3 @@
+{"model": "claude", "messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello!"}], "id": "c1"}
+{"model": "gpt", "messages": [{"role": "user", "content": "explain RAG"}], "id": "c2"}
+{oops
