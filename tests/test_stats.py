@@ -39,7 +39,11 @@ def test_total_messages_per_model():
 
 
 def test_longest_conversation():
-    convs = [make_conv("a", "gpt", 2), make_conv("b", "gpt", 5), make_conv("c", "gpt", 3)]
+    convs = [
+        make_conv("a", "gpt", 2),
+        make_conv("b", "gpt", 5),
+        make_conv("c", "gpt", 3),
+    ]
     longest = longest_conversation(convs)
     assert longest is not None
     assert longest.id == "b"
