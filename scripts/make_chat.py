@@ -1,8 +1,8 @@
-import json
 import random
-from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from ai_lab.models import Conversation, Message, save_conversations
 
 random.seed(42)
 BASE_DATE = datetime(2026, 10, 17, 12, 0, 0)
@@ -31,20 +31,6 @@ ANSWERS = [
 ]
 
 
-@dataclass(frozen=True)
-class Message:
-    role: str
-    content: str
-
-
-@dataclass
-class Conversation:
-    id: str
-    model: str
-    started_at: str
-    messages: list[Message]
-
-
 def make_conversation(i: int) -> Conversation:
     count = random.randint(2, 8)
     messages = [
@@ -61,13 +47,6 @@ def make_conversation(i: int) -> Conversation:
         started_at=started_at,
         messages=messages,
     )
-
-
-def save_conversations(convs: list[Conversation], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        for conv in convs:
-            f.write(json.dumps(asdict(conv)) + "\n")
 
 
 if __name__ == "__main__":
