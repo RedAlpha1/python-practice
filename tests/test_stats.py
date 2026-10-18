@@ -14,7 +14,8 @@ def make_conv(
     started_at: str = "2026-10-01T10:00:00",
 ) -> Conversation:
     msgs = [
-        Message("user" if i % 2 == 0 else "assistant", "x") for i in range(n_messages)
+        Message(role="user" if i % 2 == 0 else "assistant", content="x")
+        for i in range(n_messages)
     ]
     return Conversation(id=id, model=model, started_at=started_at, messages=msgs)
 
