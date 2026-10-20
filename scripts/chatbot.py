@@ -3,7 +3,15 @@ from datetime import datetime
 from pathlib import Path
 
 from ai_lab.config import get_settings
-from ai_lab.llm import ChatMessage, LLMError, chat, to_message
+from ai_lab.llm import (
+    ChatMessage,
+    LLMError,
+    LLMResponse,
+    StreamDone,
+    TextDelta,
+    stream,
+    to_message,
+)
 from ai_lab.models import Conversation, append_conversation
 
 SYSTEM = "You are a concise assistant. Keep answers under 3 sentences."
@@ -50,29 +58,39 @@ try:
 
         # Only commit the turn to history once the call succeeds.
         pending = [*history, ChatMessage(role="user", content=user_text)]
+        print("bot> ", end="", flush=True)
+        result: LLMResponse | None = None
         try:
-            result = chat(pending, system=SYSTEM, thinking_budget=thinking_budget)
+            for event in stream(
+                pending, system=SYSTEM, thinking_budget=thinking_budget
+            ):
+                match event:
+                    case TextDelta(text=text):
+                        print(text, end="", flush=True)
+                    case StreamDone(response=response):
+                        result = response
         except LLMError as e:
             wait = f", retry in {e.retry_after:.0f}s" if e.retry_after else ""
-            print(f"[API error {e.status}{wait}; turn not saved: {e}]")
+            print(f"\n[stream interrupted; turn not saved] [{e.status}{wait}: {e}]")
             continue
+        print()
 
-        if result.finish_reason != "stop" or not result.text:
+        if result is None or result.finish_reason != "stop" or not result.text:
             print(
-                f"[warning: finish_reason={result.finish_reason}, "
-                f"empty={not result.text}; turn not saved. "
-                f"in={result.input_tokens} think={result.thinking_tokens}]"
+                f"[warning: turn not saved; "
+                f"finish_reason={result.finish_reason if result else None}]"
             )
             continue
 
         history = [*pending, ChatMessage(role="assistant", content=result.text)]
         turn += 1
 
-        print(f"bot> {result.text}")
         print(
             f"     [turn {turn} | messages sent: {len(pending)} | "
             f"in={result.input_tokens} out={result.output_tokens} "
             f"think={result.thinking_tokens} | {result.finish_reason}]"
         )
+except KeyboardInterrupt:
+    print("\n[interrupted]")
 finally:
     save_session(history, started_at)

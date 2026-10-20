@@ -1,4 +1,6 @@
 import math
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cache
 from typing import Literal
 
@@ -44,6 +46,17 @@ class LLMResponse(BaseModel):
     output_tokens: int
     thinking_tokens: int
     finish_reason: FinishReason
+
+
+class TextDelta(BaseModel):
+    text: str
+
+
+class StreamDone(BaseModel):
+    response: LLMResponse
+
+
+StreamEvent = TextDelta | StreamDone
 
 
 class ChatMessage(BaseModel):
@@ -92,9 +105,66 @@ def _retry_after(details: object) -> float | None:
         try:
             seconds = float(delay.removesuffix("s"))
         except ValueError:
-            return None
-        return seconds if math.isfinite(seconds) and seconds >= 0 else None
+            continue
+        if math.isfinite(seconds) and seconds >= 0:
+            return seconds
     return None
+
+
+def _build_config(
+    system: str | None,
+    max_tokens: int | None,
+    thinking_budget: int | None,
+) -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
+        max_output_tokens=(
+            get_settings().max_tokens if max_tokens is None else max_tokens
+        ),
+        system_instruction=system,
+        thinking_config=(
+            None
+            if thinking_budget is None
+            else types.ThinkingConfig(thinking_budget=thinking_budget)
+        ),
+    )
+
+
+def _to_contents(history: list[ChatMessage]) -> list[types.Content]:
+    return [
+        types.Content(role=_ROLE_MAP[m.role], parts=[types.Part(text=m.content)])
+        for m in history
+    ]
+
+
+@contextmanager
+def _translate_errors() -> Iterator[None]:
+    """Turn provider and network exceptions into LLMError."""
+    try:
+        yield
+    except genai_errors.APIError as e:
+        raise LLMError(
+            e.message or str(e), status=e.code, retry_after=_retry_after(e.details)
+        ) from e
+    except httpx.TransportError as e:  # no HTTP response: DNS, connection, timeout
+        raise LLMError(f"network error: {e!r}") from e
+
+
+def _make_response(
+    text: str,
+    usage: types.GenerateContentResponseUsageMetadata | None,
+    finish: types.FinishReason | None,
+) -> LLMResponse:
+    return LLMResponse(
+        text=text,
+        input_tokens=(usage.prompt_token_count or 0) if usage else 0,
+        output_tokens=(usage.candidates_token_count or 0) if usage else 0,
+        thinking_tokens=(usage.thoughts_token_count or 0) if usage else 0,
+        finish_reason=_normalize_finish(finish),
+    )
+
+
+def _model_name(model: str | None) -> str:
+    return get_settings().default_model if model is None else model
 
 
 def _generate(
@@ -104,37 +174,17 @@ def _generate(
     max_tokens: int | None,
     thinking_budget: int | None,
 ) -> LLMResponse:
-    settings = get_settings()
-    config = types.GenerateContentConfig(
-        max_output_tokens=settings.max_tokens if max_tokens is None else max_tokens,
-        system_instruction=system,
-        thinking_config=(
-            None
-            if thinking_budget is None
-            else types.ThinkingConfig(thinking_budget=thinking_budget)
-        ),
-    )
-    try:
+    config = _build_config(system, max_tokens, thinking_budget)
+    with _translate_errors():
         response = _client().models.generate_content(
-            model=settings.default_model if model is None else model,
-            contents=contents,
-            config=config,
+            model=_model_name(model), contents=contents, config=config
         )
-    except genai_errors.APIError as e:
-        raise LLMError(
-            e.message or str(e), status=e.code, retry_after=_retry_after(e.details)
-        ) from e
-    except httpx.TransportError as e:  # no HTTP response: DNS, connection, timeout
-        raise LLMError(f"network error: {e!r}") from e
 
-    usage = response.usage_metadata
     candidate = response.candidates[0] if response.candidates else None
-    return LLMResponse(
-        text=response.text or "",
-        input_tokens=(usage.prompt_token_count or 0) if usage else 0,
-        output_tokens=(usage.candidates_token_count or 0) if usage else 0,
-        thinking_tokens=(usage.thoughts_token_count or 0) if usage else 0,
-        finish_reason=_normalize_finish(candidate.finish_reason if candidate else None),
+    return _make_response(
+        response.text or "",
+        response.usage_metadata,
+        candidate.finish_reason if candidate else None,
     )
 
 
@@ -156,8 +206,33 @@ def chat(
     thinking_budget: int | None = None,
 ) -> LLMResponse:
     """Send the whole conversation so far; the last message should be the user's."""
-    contents = [
-        types.Content(role=_ROLE_MAP[m.role], parts=[types.Part(text=m.content)])
-        for m in history
-    ]
-    return _generate(contents, system, model, max_tokens, thinking_budget)
+    return _generate(_to_contents(history), system, model, max_tokens, thinking_budget)
+
+
+def stream(
+    history: list[ChatMessage],
+    system: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+    thinking_budget: int | None = None,
+) -> Iterator[StreamEvent]:
+    """Yield a TextDelta per chunk of text, then one StreamDone with the full reply."""
+    config = _build_config(system, max_tokens, thinking_budget)
+    pieces: list[str] = []
+    usage: types.GenerateContentResponseUsageMetadata | None = None
+    finish: types.FinishReason | None = None
+
+    # The error can strike at chunk 40, so the whole loop is inside the context.
+    with _translate_errors():
+        for chunk in _client().models.generate_content_stream(
+            model=_model_name(model), contents=_to_contents(history), config=config
+        ):
+            if chunk.text:  # thinking chunks and the final chunk can have no text
+                pieces.append(chunk.text)
+                yield TextDelta(text=chunk.text)
+            if chunk.usage_metadata:
+                usage = chunk.usage_metadata
+            if chunk.candidates and chunk.candidates[0].finish_reason:
+                finish = chunk.candidates[0].finish_reason
+
+    yield StreamDone(response=_make_response("".join(pieces), usage, finish))
