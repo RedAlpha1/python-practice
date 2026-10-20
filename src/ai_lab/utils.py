@@ -1,5 +1,6 @@
 import logging
 import time
+from contextlib import contextmanager
 from functools import wraps
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,32 @@ def retry(
     return decorator
 
 
+class Timer:
+    def __init__(self, label: str):
+        self.label = label
+
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.elapsed = time.perf_counter() - self.start
+        logger.info(
+            "%s took %.3fs", self.label, self.elapsed
+        )  # builds it only if the log is shown
+        return False
+
+
+@contextmanager
+def timer(label: str):
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        logger.info("%s took %.3fs", label, elapsed)
+
+
 if __name__ == "__main__":
     import random
 
@@ -70,6 +97,15 @@ if __name__ == "__main__":
         ("100% failure", 1.0, ConnectionError, (ConnectionError,)),
         ("bug not retried", 1.0, ValueError, (ConnectionError,)),
     ]
+
+    for cm in (Timer("class version"), timer("generator version")):
+        try:
+            with cm:
+                time.sleep(0.1)
+                raise ValueError("boom")
+        except ValueError:
+            logger.info("caught it")
+
     for name, rate, error, exc in scenarios:
         random.seed(1)
         logger.info("--- %s", name)
