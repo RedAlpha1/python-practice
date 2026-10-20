@@ -28,6 +28,12 @@ def save_conversations(convs: list[Conversation], path: Path) -> None:
             f.write(conv.model_dump_json() + "\n")
 
 
+def append_conversation(conv: Conversation, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as f:
+        f.write(conv.model_dump_json() + "\n")
+
+
 def load_conversations(path: Path) -> list[Conversation]:
     convs = []
     with open(path) as f:
