@@ -1,19 +1,25 @@
+"""Gemini backend: turns provider details into the types in ai_lab.llm.schemas."""
+
 import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cache
-from typing import Literal
 
 import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from pydantic import BaseModel
 
 from ai_lab.config import get_settings
-from ai_lab.models import Message
-
-FinishReason = Literal["stop", "max_tokens", "safety", "other"]
+from ai_lab.llm.schemas import (
+    ChatMessage,
+    FinishReason,
+    LLMError,
+    LLMResponse,
+    StreamDone,
+    StreamEvent,
+    TextDelta,
+)
 
 _FINISH_MAP: dict[types.FinishReason, FinishReason] = {
     types.FinishReason.STOP: "stop",
@@ -23,55 +29,6 @@ _FINISH_MAP: dict[types.FinishReason, FinishReason] = {
 
 # Gemini calls the assistant "model"; our public vocabulary says "assistant".
 _ROLE_MAP = {"user": "user", "assistant": "model"}
-
-
-class LLMError(Exception):
-    """Provider-independent API failure; status and retry_after may be unknown."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        status: int | None = None,
-        retry_after: float | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.status = status
-        self.retry_after = retry_after
-
-
-class LLMResponse(BaseModel):
-    text: str
-    input_tokens: int
-    output_tokens: int
-    thinking_tokens: int
-    finish_reason: FinishReason
-
-
-class TextDelta(BaseModel):
-    text: str
-
-
-class StreamDone(BaseModel):
-    response: LLMResponse
-
-
-StreamEvent = TextDelta | StreamDone
-
-
-class ChatMessage(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
-
-
-def to_message(msg: ChatMessage) -> Message:
-    return Message(role=msg.role, content=msg.content)
-
-
-def from_message(msg: Message) -> ChatMessage:
-    if msg.role == "system":
-        raise ValueError("system messages are not part of a chat history")
-    return ChatMessage(role=msg.role, content=msg.content)
 
 
 @cache
