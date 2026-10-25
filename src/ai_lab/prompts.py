@@ -1,6 +1,7 @@
-from ai_lab.models import Conversation, load_conversations
-from textwrap import dedent
 from pathlib import Path
+from textwrap import dedent
+
+from ai_lab.models import Conversation, load_conversations
 
 
 def build_summary_prompt(conv: Conversation, max_messages: int = 6) -> str:

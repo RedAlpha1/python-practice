@@ -1,8 +1,8 @@
 """Provider-neutral types: the contract every LLM backend returns and accepts."""
 
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from ai_lab.models import Message
 
@@ -40,6 +40,52 @@ class StreamDone(BaseModel):
     response: LLMResponse
 
 
+class ToolSpec(BaseModel):
+    name: str
+    description: str
+    parameter: dict[str, Any]
+
+
+class ToolCall(BaseModel):
+    id: str | None = None
+    name: str
+    args: dict[str, Any] = {}
+
+
+class ToolResult(BaseModel):
+    call_id: str | None = None
+    name: str
+    output: Any = None
+    error: str | None = None
+
+    @model_validator(mode="after")
+    def _not_both(self) -> "ToolResult":
+        # A result is either a success or a failure, never both.
+        if self.error is not None and self.output is not None:
+            raise ValueError("ToolResult can't have both output and error")
+        return self
+
+
+class UserText(BaseModel):
+    kind: Literal["user"] = "user"
+    text: str
+
+
+class AssistantTurn(BaseModel):
+    kind: Literal["assistant"] = "assistant"
+    text: str = ""
+    tool_calls: list[ToolCall] = []
+    provider_raw: Any = Field(default=None, exclude=True)  # sirf gemini.py ke liye
+
+
+class ToolResultsTurn(BaseModel):
+    kind: Literal["tool_results"] = "tool_results"
+    results: list[ToolResult]
+
+
+Turn = Annotated[
+    UserText | AssistantTurn | ToolResultsTurn, Field(discriminator="kind")
+]
 StreamEvent = TextDelta | StreamDone
 
 

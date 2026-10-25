@@ -24,8 +24,7 @@ class Conversation(BaseModel):
 def save_conversations(convs: list[Conversation], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
-        for conv in convs:
-            f.write(conv.model_dump_json() + "\n")
+        f.writelines(conv.model_dump_json() + "\n" for conv in convs)
 
 
 def append_conversation(conv: Conversation, path: Path) -> None:

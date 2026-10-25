@@ -4,6 +4,7 @@ import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cache
+from typing import assert_never
 
 import httpx
 from google import genai
@@ -12,6 +13,7 @@ from google.genai import types
 
 from ai_lab.config import get_settings
 from ai_lab.llm.schemas import (
+    AssistantTurn,
     ChatMessage,
     FinishReason,
     LLMError,
@@ -19,6 +21,10 @@ from ai_lab.llm.schemas import (
     StreamDone,
     StreamEvent,
     TextDelta,
+    ToolResult,
+    ToolResultsTurn,
+    Turn,
+    UserText,
 )
 
 _FINISH_MAP: dict[types.FinishReason, FinishReason] = {
@@ -193,3 +199,53 @@ def stream(
                 finish = chunk.candidates[0].finish_reason
 
     yield StreamDone(response=_make_response("".join(pieces), usage, finish))
+
+
+def _tool_result_part(result: ToolResult) -> types.Part:
+    # Gemini's convention: "error" key on failure, "output" key on success.
+    response = (
+        {"error": result.error}
+        if result.error is not None
+        else {"output": result.output}
+    )
+    return types.Part(
+        function_response=types.FunctionResponse(
+            id=result.call_id, name=result.name, response=response
+        )
+    )
+
+
+def _turns_to_contents(turns: list[Turn]) -> list[types.Content]:
+    contents: list[types.Content] = []
+    for turn in turns:
+        match turn:
+            case UserText(text=text):
+                contents.append(
+                    types.Content(role="user", parts=[types.Part(text=text)])
+                )
+            case AssistantTurn(provider_raw=types.Content() as raw):
+                # Gemini's own turn, exactly as it came (keeps call ids and
+                # thought signatures, which a rebuilt turn would lose).
+                contents.append(raw)
+            case AssistantTurn(text=text, tool_calls=calls):
+                parts = [types.Part(text=text)] if text else []
+                parts += [
+                    types.Part(
+                        function_call=types.FunctionCall(
+                            id=c.id, name=c.name, args=c.args
+                        )
+                    )
+                    for c in calls
+                ]
+                if not parts:
+                    raise ValueError("AssistantTurn has neither text nor tool calls")
+                contents.append(types.Content(role="model", parts=parts))
+            case ToolResultsTurn(results=results):
+                contents.append(
+                    types.Content(
+                        role="user", parts=[_tool_result_part(r) for r in results]
+                    )
+                )
+            case _:
+                assert_never(turn)  # a new Turn type must get its own case above
+    return contents
