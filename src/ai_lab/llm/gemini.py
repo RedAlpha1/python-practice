@@ -10,6 +10,7 @@ import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
+from pydantic import BaseModel, ValidationError
 
 from ai_lab.config import get_settings
 from ai_lab.llm.schemas import (
@@ -20,9 +21,12 @@ from ai_lab.llm.schemas import (
     LLMResponse,
     StreamDone,
     StreamEvent,
+    StructuredOutputError,
     TextDelta,
+    ToolCall,
     ToolResult,
     ToolResultsTurn,
+    ToolSpec,
     Turn,
     UserText,
 )
@@ -226,6 +230,8 @@ def _turns_to_contents(turns: list[Turn]) -> list[types.Content]:
             case AssistantTurn(provider_raw=types.Content() as raw):
                 # Gemini's own turn, exactly as it came (keeps call ids and
                 # thought signatures, which a rebuilt turn would lose).
+                if not raw.parts:  # e.g. a safety block: Gemini would answer 400
+                    raise ValueError("AssistantTurn has neither text nor tool calls")
                 contents.append(raw)
             case AssistantTurn(text=text, tool_calls=calls):
                 parts = [types.Part(text=text)] if text else []
@@ -249,3 +255,98 @@ def _turns_to_contents(turns: list[Turn]) -> list[types.Content]:
             case _:
                 assert_never(turn)  # a new Turn type must get its own case above
     return contents
+
+
+def _tool_declaration(spec: ToolSpec) -> types.FunctionDeclaration:
+    return types.FunctionDeclaration(
+        name=spec.name,
+        description=spec.description,
+        parameters_json_schema=spec.parameter,
+    )
+
+
+def _reply_text(content: types.Content | None) -> str:
+    """Join the visible text parts. resp.text would warn when a function_call is there."""
+    if content is None or not content.parts:
+        return ""
+    return "".join(p.text for p in content.parts if p.text and not p.thought)
+
+
+def generate_turn(
+    turns: list[Turn],
+    tools: list[ToolSpec],
+    system: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+    thinking_budget: int | None = None,
+) -> tuple[AssistantTurn, LLMResponse]:
+    """One model round: send the turns, get back the assistant's turn and usage.
+
+    The model may answer with text, tool calls, or both. We do NOT run the tools:
+    the caller does that and appends a ToolResultsTurn before the next round.
+    """
+    config = _build_config(system, max_tokens, thinking_budget)
+    if tools:
+        config.tools = [
+            types.Tool(function_declarations=[_tool_declaration(t) for t in tools])
+        ]
+    # The SDK would otherwise run Python-callable tools itself; we run them ourselves.
+    config.automatic_function_calling = types.AutomaticFunctionCallingConfig(
+        disable=True
+    )
+
+    with _translate_errors():
+        resp = _client().models.generate_content(
+            model=_model_name(model),
+            contents=_turns_to_contents(turns),
+            config=config,
+        )
+
+    candidate = resp.candidates[0] if resp.candidates else None
+    content = candidate.content if candidate else None
+    text = _reply_text(content)
+    tool_calls = [
+        ToolCall(id=c.id, name=c.name or "", args=c.args or {})
+        for c in resp.function_calls or []
+    ]
+    turn = AssistantTurn(text=text, tool_calls=tool_calls, provider_raw=content)
+    response = _make_response(
+        text, resp.usage_metadata, candidate.finish_reason if candidate else None
+    )
+    return turn, response
+
+
+def ask_structured[T: BaseModel](
+    prompt: str,
+    schema: type[T],
+    system: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+    thinking_budget: int | None = None,
+) -> tuple[T, LLMResponse]:
+    """Ask for JSON that matches `schema`; return the validated object and the usage."""
+    config = _build_config(system, max_tokens, thinking_budget)
+    config.response_mime_type = "application/json"
+    config.response_json_schema = schema.model_json_schema()
+
+    with _translate_errors():
+        resp = _client().models.generate_content(
+            model=_model_name(model), contents=prompt, config=config
+        )
+
+    candidate = resp.candidates[0] if resp.candidates else None
+    text = _reply_text(candidate.content if candidate else None)
+    response = _make_response(
+        text, resp.usage_metadata, candidate.finish_reason if candidate else None
+    )
+
+    if response.finish_reason == "max_tokens":  # the JSON is cut off halfway
+        raise StructuredOutputError(
+            "output hit max_tokens, so the JSON is incomplete", raw=text
+        )
+    try:
+        return schema.model_validate_json(text), response
+    except ValidationError as e:
+        raise StructuredOutputError(
+            f"model output does not match {schema.__name__}: {e}", raw=text
+        ) from e

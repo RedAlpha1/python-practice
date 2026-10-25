@@ -52,3 +52,17 @@ def test_tool_result_uses_output_or_error_key():
     assert ok[0].function_response.response == {"output": 5}
     assert bad and bad[0].function_response is not None
     assert bad[0].function_response.response == {"error": "boom"}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param(types.Content(role="model", parts=[]), id="empty-parts"),
+        pytest.param(types.Content(role="model"), id="no-parts"),
+    ],
+)
+def test_empty_provider_raw_is_rejected_too(raw):
+    # A safety block can leave a raw Content with nothing in it; passing it back
+    # would bypass the empty-turn check and make Gemini answer 400.
+    with pytest.raises(ValueError, match="neither text nor tool calls"):
+        _turns_to_contents([AssistantTurn(provider_raw=raw)])

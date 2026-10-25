@@ -24,6 +24,14 @@ class LLMError(Exception):
         self.retry_after = retry_after
 
 
+class StructuredOutputError(Exception):
+    """Model Json Does not match with our Pydantic model"""
+
+    def __init__(self, message: str, *, raw: str) -> None:
+        super().__init__(message)
+        self.raw = raw
+
+
 class LLMResponse(BaseModel):
     text: str
     input_tokens: int
