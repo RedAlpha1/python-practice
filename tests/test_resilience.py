@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from ai_lab.utils import Timer, timer
+from ai_lab.resilience import Timer, timer
 
 
 def test_timer_records_elapsed():

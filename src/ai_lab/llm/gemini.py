@@ -13,6 +13,7 @@ from google.genai import types
 from pydantic import BaseModel, ValidationError
 
 from ai_lab.config import get_settings
+from ai_lab.llm.retry import retry_llm
 from ai_lab.llm.schemas import (
     AssistantTurn,
     ChatMessage,
@@ -155,6 +156,7 @@ def _generate(
     )
 
 
+@retry_llm()
 def ask(
     prompt: str,
     system: str | None = None,
@@ -165,6 +167,7 @@ def ask(
     return _generate(prompt, system, model, max_tokens, thinking_budget)
 
 
+@retry_llm()
 def chat(
     history: list[ChatMessage],
     system: str | None = None,
@@ -176,6 +179,8 @@ def chat(
     return _generate(_to_contents(history), system, model, max_tokens, thinking_budget)
 
 
+# No @retry_llm here: by the time a stream fails, chunks are already on the user's
+# screen, and a retry would replay the reply from the start.
 def stream(
     history: list[ChatMessage],
     system: str | None = None,
@@ -272,6 +277,7 @@ def _reply_text(content: types.Content | None) -> str:
     return "".join(p.text for p in content.parts if p.text and not p.thought)
 
 
+@retry_llm()
 def generate_turn(
     turns: list[Turn],
     tools: list[ToolSpec],
@@ -316,6 +322,7 @@ def generate_turn(
     return turn, response
 
 
+@retry_llm()
 def ask_structured[T: BaseModel](
     prompt: str,
     schema: type[T],
@@ -340,13 +347,17 @@ def ask_structured[T: BaseModel](
         text, resp.usage_metadata, candidate.finish_reason if candidate else None
     )
 
-    if response.finish_reason == "max_tokens":  # the JSON is cut off halfway
+    if response.finish_reason != "stop":  # cut off, blocked, or otherwise unfinished
         raise StructuredOutputError(
-            "output hit max_tokens, so the JSON is incomplete", raw=text
+            f"reply is not a finished answer (finish_reason={response.finish_reason})",
+            raw=text,
+            response=response,
         )
     try:
         return schema.model_validate_json(text), response
     except ValidationError as e:
         raise StructuredOutputError(
-            f"model output does not match {schema.__name__}: {e}", raw=text
+            f"model output does not match {schema.__name__}: {e}",
+            raw=text,
+            response=response,
         ) from e

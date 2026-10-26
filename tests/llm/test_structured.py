@@ -49,13 +49,27 @@ def test_schema_and_json_mode_are_sent_to_the_api(install_models):
     assert models.kwargs["contents"] == "summarize"
 
 
-def test_cut_off_json_raises_with_the_raw_text(install_models):
-    install_models(reply('{"topic": "RAG', finish=types.FinishReason.MAX_TOKENS))
+@pytest.mark.parametrize(
+    ("finish", "reason"),
+    [
+        pytest.param(types.FinishReason.MAX_TOKENS, "max_tokens", id="cut-off"),
+        pytest.param(types.FinishReason.SAFETY, "safety", id="blocked"),
+        pytest.param(types.FinishReason.RECITATION, "other", id="other"),
+    ],
+)
+def test_unfinished_reply_raises_with_raw_text_and_usage(
+    install_models, finish, reason
+):
+    # Valid-looking JSON must not be trusted when the reply did not finish normally.
+    install_models(reply('{"topic": "RAG', finish=finish))
 
-    with pytest.raises(StructuredOutputError, match="max_tokens") as info:
+    with pytest.raises(StructuredOutputError, match=f"finish_reason={reason}") as info:
         ask_structured("summarize", Summary)
 
     assert info.value.raw == '{"topic": "RAG'
+    assert info.value.response is not None  # the failed call's cost is not lost
+    assert info.value.response.finish_reason == reason
+    assert info.value.response.input_tokens == 11
 
 
 @pytest.mark.parametrize(
@@ -75,6 +89,8 @@ def test_output_that_does_not_match_raises_with_the_raw_text(install_models, tex
 
     assert info.value.raw == text
     assert info.value.__cause__ is not None  # the original ValidationError
+    assert info.value.response is not None
+    assert info.value.response.output_tokens == 4  # usage kept here too
 
 
 def test_thought_parts_are_not_parsed_as_json(install_models):

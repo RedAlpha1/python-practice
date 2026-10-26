@@ -24,20 +24,27 @@ class LLMError(Exception):
         self.retry_after = retry_after
 
 
-class StructuredOutputError(Exception):
-    """Model Json Does not match with our Pydantic model"""
-
-    def __init__(self, message: str, *, raw: str) -> None:
-        super().__init__(message)
-        self.raw = raw
-
-
 class LLMResponse(BaseModel):
     text: str
     input_tokens: int
     output_tokens: int
     thinking_tokens: int
     finish_reason: FinishReason
+
+
+class StructuredOutputError(Exception):
+    """The model's reply is not usable JSON for our Pydantic model.
+
+    `raw` is the text we got; `response` keeps the usage of the failed call, so its
+    cost can still be recorded.
+    """
+
+    def __init__(
+        self, message: str, *, raw: str, response: LLMResponse | None = None
+    ) -> None:
+        super().__init__(message)
+        self.raw = raw
+        self.response = response
 
 
 class TextDelta(BaseModel):

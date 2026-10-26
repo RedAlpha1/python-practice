@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,12 @@ def fake_key(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def no_real_sleep(monkeypatch):
+    """The public calls retry transient errors; never really wait in tests."""
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
 
 @pytest.fixture
