@@ -28,6 +28,9 @@ def scripted(*replies: AssistantTurn) -> GenerateFn:
             output_tokens=0,
             thinking_tokens=0,
             finish_reason="stop",
+            model="fake",
+            latency_ms=0,
+            first_token_ms=None,
         )
 
     return fake

@@ -1,6 +1,7 @@
 """Gemini backend: turns provider details into the types in ai_lab.llm.schemas."""
 
 import math
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cache
@@ -31,6 +32,7 @@ from ai_lab.llm.schemas import (
     Turn,
     UserText,
 )
+from ai_lab.resilience import Timer
 
 _FINISH_MAP: dict[types.FinishReason, FinishReason] = {
     types.FinishReason.STOP: "stop",
@@ -117,10 +119,18 @@ def _translate_errors() -> Iterator[None]:
         raise LLMError(f"network error: {e!r}") from e
 
 
+def _ms(seconds: float) -> int:
+    return round(seconds * 1000)
+
+
 def _make_response(
     text: str,
     usage: types.GenerateContentResponseUsageMetadata | None,
     finish: types.FinishReason | None,
+    *,
+    model: str,
+    latency_ms: int,
+    first_token_ms: int | None,
 ) -> LLMResponse:
     return LLMResponse(
         text=text,
@@ -128,6 +138,9 @@ def _make_response(
         output_tokens=(usage.candidates_token_count or 0) if usage else 0,
         thinking_tokens=(usage.thoughts_token_count or 0) if usage else 0,
         finish_reason=_normalize_finish(finish),
+        model=model,
+        latency_ms=latency_ms,
+        first_token_ms=first_token_ms,
     )
 
 
@@ -143,9 +156,10 @@ def _generate(
     thinking_budget: int | None,
 ) -> LLMResponse:
     config = _build_config(system, max_tokens, thinking_budget)
-    with _translate_errors():
+    name = _model_name(model)
+    with Timer("generate") as t, _translate_errors():
         response = _client().models.generate_content(
-            model=_model_name(model), contents=contents, config=config
+            model=name, contents=contents, config=config
         )
 
     candidate = response.candidates[0] if response.candidates else None
@@ -153,6 +167,9 @@ def _generate(
         response.text or "",
         response.usage_metadata,
         candidate.finish_reason if candidate else None,
+        model=name,
+        latency_ms=_ms(t.elapsed),
+        first_token_ms=None,
     )
 
 
@@ -188,18 +205,26 @@ def stream(
     max_tokens: int | None = None,
     thinking_budget: int | None = None,
 ) -> Iterator[StreamEvent]:
-    """Yield a TextDelta per chunk of text, then one StreamDone with the full reply."""
+    """Yield a TextDelta per chunk of text, then one StreamDone with the full reply.
+
+    The StreamDone response has two timings: first_token_ms (how long until the user
+    saw the first word) and latency_ms (the whole stream).
+    """
     config = _build_config(system, max_tokens, thinking_budget)
+    name = _model_name(model)
     pieces: list[str] = []
     usage: types.GenerateContentResponseUsageMetadata | None = None
     finish: types.FinishReason | None = None
+    first_token_ms: int | None = None
 
     # The error can strike at chunk 40, so the whole loop is inside the context.
-    with _translate_errors():
+    with Timer("stream") as t, _translate_errors():
         for chunk in _client().models.generate_content_stream(
-            model=_model_name(model), contents=_to_contents(history), config=config
+            model=name, contents=_to_contents(history), config=config
         ):
             if chunk.text:  # thinking chunks and the final chunk can have no text
+                if first_token_ms is None:
+                    first_token_ms = _ms(time.perf_counter() - t.start)
                 pieces.append(chunk.text)
                 yield TextDelta(text=chunk.text)
             if chunk.usage_metadata:
@@ -207,7 +232,16 @@ def stream(
             if chunk.candidates and chunk.candidates[0].finish_reason:
                 finish = chunk.candidates[0].finish_reason
 
-    yield StreamDone(response=_make_response("".join(pieces), usage, finish))
+    yield StreamDone(
+        response=_make_response(
+            "".join(pieces),
+            usage,
+            finish,
+            model=name,
+            latency_ms=_ms(t.elapsed),
+            first_token_ms=first_token_ms,
+        )
+    )
 
 
 def _tool_result_part(result: ToolResult) -> types.Part:
@@ -301,11 +335,10 @@ def generate_turn(
         disable=True
     )
 
-    with _translate_errors():
+    name = _model_name(model)
+    with Timer("generate_turn") as t, _translate_errors():
         resp = _client().models.generate_content(
-            model=_model_name(model),
-            contents=_turns_to_contents(turns),
-            config=config,
+            model=name, contents=_turns_to_contents(turns), config=config
         )
 
     candidate = resp.candidates[0] if resp.candidates else None
@@ -317,7 +350,12 @@ def generate_turn(
     ]
     turn = AssistantTurn(text=text, tool_calls=tool_calls, provider_raw=content)
     response = _make_response(
-        text, resp.usage_metadata, candidate.finish_reason if candidate else None
+        text,
+        resp.usage_metadata,
+        candidate.finish_reason if candidate else None,
+        model=name,
+        latency_ms=_ms(t.elapsed),
+        first_token_ms=None,
     )
     return turn, response
 
@@ -336,15 +374,21 @@ def ask_structured[T: BaseModel](
     config.response_mime_type = "application/json"
     config.response_json_schema = schema.model_json_schema()
 
-    with _translate_errors():
+    name = _model_name(model)
+    with Timer("ask_structured") as t, _translate_errors():
         resp = _client().models.generate_content(
-            model=_model_name(model), contents=prompt, config=config
+            model=name, contents=prompt, config=config
         )
 
     candidate = resp.candidates[0] if resp.candidates else None
     text = _reply_text(candidate.content if candidate else None)
     response = _make_response(
-        text, resp.usage_metadata, candidate.finish_reason if candidate else None
+        text,
+        resp.usage_metadata,
+        candidate.finish_reason if candidate else None,
+        model=name,
+        latency_ms=_ms(t.elapsed),
+        first_token_ms=None,
     )
 
     if response.finish_reason != "stop":  # cut off, blocked, or otherwise unfinished

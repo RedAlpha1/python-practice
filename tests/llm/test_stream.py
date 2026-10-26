@@ -3,7 +3,7 @@ import pytest
 from google.genai import errors as genai_errors
 from google.genai import types
 
-from ai_lab.llm import ChatMessage, LLMError, LLMResponse, StreamDone, TextDelta, stream
+from ai_lab.llm import ChatMessage, LLMError, StreamDone, TextDelta, stream
 from tests.llm.fakes import StreamingModels, chunk, error_body
 
 HISTORY = [ChatMessage(role="user", content="hi")]
@@ -29,13 +29,11 @@ def test_yields_deltas_then_done(install_models):
     assert events[:-1] == [TextDelta(text="Hel"), TextDelta(text="lo")]
     done = events[-1]
     assert isinstance(done, StreamDone)
-    assert done.response == LLMResponse(
-        text="Hello",
-        input_tokens=5,
-        output_tokens=7,
-        thinking_tokens=2,
-        finish_reason="stop",
-    )
+    r = done.response
+    assert (r.text, r.input_tokens, r.output_tokens) == ("Hello", 5, 7)
+    assert (r.thinking_tokens, r.finish_reason) == (2, "stop")
+    assert r.latency_ms >= 0
+    assert r.first_token_ms is not None  # exact timings: see test_timing.py
 
 
 def test_server_error_mid_stream_after_some_text(install_models):

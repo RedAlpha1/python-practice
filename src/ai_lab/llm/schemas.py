@@ -30,6 +30,9 @@ class LLMResponse(BaseModel):
     output_tokens: int
     thinking_tokens: int
     finish_reason: FinishReason
+    model: str
+    latency_ms: int  # the API call itself (last attempt), not retry sleeps
+    first_token_ms: int | None  # streaming only: time until the first text; else None
 
 
 class StructuredOutputError(Exception):
