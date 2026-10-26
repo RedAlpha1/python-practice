@@ -1,6 +1,7 @@
 """Provider-neutral types: the contract every LLM backend returns and accepts."""
 
-from typing import Annotated, Any, Literal
+from collections.abc import Sequence
+from typing import Annotated, Any, Literal, assert_never
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -120,3 +121,23 @@ def from_message(msg: Message) -> ChatMessage:
     if msg.role == "system":
         raise ValueError("system messages are not part of a chat history")
     return ChatMessage(role=msg.role, content=msg.content)
+
+
+def turns_to_messages(turns: Sequence[Turn]) -> list[Message]:
+    """The text-only chat to save: user questions and the assistant's final answers.
+
+    Tool plumbing (tool calls, tool results, and any text said while calling a tool)
+    does not fit in a Message, so it is left out.
+    """
+    messages: list[Message] = []
+    for turn in turns:
+        match turn:
+            case UserText(text=text):
+                messages.append(Message(role="user", content=text))
+            case AssistantTurn(text=text, tool_calls=[]) if text:
+                messages.append(Message(role="assistant", content=text))
+            case AssistantTurn() | ToolResultsTurn():
+                pass
+            case _:
+                assert_never(turn)
+    return messages
