@@ -24,18 +24,28 @@ Handler = Callable[..., object]
 class ToolLoopError(Exception):
     """The tool loop could not finish with an answer.
 
-    `rounds` holds the usage of the model calls made before it gave up, so the cost
-    of a failed run is not lost.
+    `history` and `rounds` hold what happened before it gave up, so a failed run still
+    shows how far it got and what it cost.
     """
 
-    def __init__(self, message: str, *, rounds: list[LLMResponse]) -> None:
+    def __init__(
+        self, message: str, *, history: list[Turn], rounds: list[LLMResponse]
+    ) -> None:
         super().__init__(message)
+        self.history = history
         self.rounds = rounds
 
 
 class ToolRunResult(BaseModel):
     history: list[Turn]
     rounds: list[LLMResponse]  # one per model call, in order
+
+    @property
+    def total_tokens(self) -> int:
+        """Input + output + thinking tokens over all rounds."""
+        return sum(
+            r.input_tokens + r.output_tokens + r.thinking_tokens for r in self.rounds
+        )
 
     def total_cost_usd(self) -> float | None:
         """Cost of the whole question, or None if any round used an unpriced model."""
@@ -83,7 +93,9 @@ def run_with_tools(
         # An empty turn must never enter the history: Gemini rejects it next round.
         if not turn.text and not turn.tool_calls:
             raise ToolLoopError(
-                f"empty reply, finish_reason={response.finish_reason}", rounds=rounds
+                f"empty reply, finish_reason={response.finish_reason}",
+                history=history,
+                rounds=rounds,
             )
         history.append(turn)
 
@@ -94,5 +106,7 @@ def run_with_tools(
         history.append(ToolResultsTurn(results=results))
 
     raise ToolLoopError(
-        f"model still asking for tools after {max_steps} steps", rounds=rounds
+        f"model still asking for tools after {max_steps} steps",
+        history=history,
+        rounds=rounds,
     )

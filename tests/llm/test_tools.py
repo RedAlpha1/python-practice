@@ -269,3 +269,55 @@ def test_total_cost_is_none_if_any_round_is_unpriced():
         QUESTION, [], HANDLERS, generate=scripted(AssistantTurn(text="Hi."))
     )  # model "fake" has no price
     assert result.total_cost_usd() is None
+
+
+def test_two_tool_rounds_then_a_final_answer_make_three_rounds():
+    generate = scripted(
+        AssistantTurn(tool_calls=[call("add", "c1", a=1, b=2)]),
+        AssistantTurn(tool_calls=[call("add", "c2", a=3, b=4)]),
+        AssistantTurn(text="Done."),
+    )
+    result = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+
+    assert len(result.rounds) == 3
+
+
+def test_failed_run_error_carries_the_history_so_far():
+    always = AssistantTurn(tool_calls=[call("add", "c1", a=1, b=1)])
+    with pytest.raises(ToolLoopError) as info:
+        run_with_tools(
+            QUESTION,
+            [],
+            HANDLERS,
+            generate=scripted(always, always),
+            max_steps=2,
+        )
+
+    # user, then (assistant, results) twice: everything up to giving up
+    assert [t.kind for t in info.value.history] == [
+        "user",
+        "assistant",
+        "tool_results",
+        "assistant",
+        "tool_results",
+    ]
+
+
+def test_empty_reply_error_history_excludes_the_empty_turn():
+    with pytest.raises(ToolLoopError) as info:
+        run_with_tools(QUESTION, [], HANDLERS, generate=scripted(AssistantTurn()))
+
+    assert [t.kind for t in info.value.history] == ["user"]
+
+
+def test_total_tokens_adds_input_output_and_thinking_over_all_rounds():
+    generate = scripted(
+        AssistantTurn(tool_calls=[call("add", "c1", a=1, b=2)]),
+        AssistantTurn(text="3."),
+    )
+    result = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+    first, second = result.rounds
+    first.input_tokens, first.output_tokens, first.thinking_tokens = 10, 5, 100
+    second.input_tokens, second.output_tokens, second.thinking_tokens = 20, 7, 0
+
+    assert result.total_tokens == 10 + 5 + 100 + 20 + 7 + 0
