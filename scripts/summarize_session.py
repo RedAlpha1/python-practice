@@ -3,11 +3,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ai_lab.llm import LLMError, StructuredOutputError, ask_structured
+from ai_lab.llm import LLMError, StructuredOutputError, ask_structured, log_usage_to
 from ai_lab.models import load_conversations
 from ai_lab.prompts import build_summary_prompt
 
 SESSIONS_PATH = Path("data/chat_sessions.jsonl")
+USAGE_PATH = Path("data/llm_calls.jsonl")
 
 
 class Summary(BaseModel):
@@ -17,6 +18,7 @@ class Summary(BaseModel):
 
 
 def main() -> None:
+    log_usage_to(USAGE_PATH)
     sessions = load_conversations(SESSIONS_PATH) if SESSIONS_PATH.exists() else []
     if not sessions:
         raise SystemExit(f"No saved sessions in {SESSIONS_PATH}. Run chatbot.py first.")

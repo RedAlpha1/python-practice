@@ -13,6 +13,7 @@ from ai_lab.llm.schemas import (
     from_message,
     to_message,
 )
+from ai_lab.llm.usage import log_usage_to
 
 __all__ = [
     "ChatMessage",
@@ -27,6 +28,7 @@ __all__ = [
     "ask_structured",
     "chat",
     "from_message",
+    "log_usage_to",
     "stream",
     "to_message",
 ]

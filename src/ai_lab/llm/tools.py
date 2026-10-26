@@ -2,8 +2,10 @@
 
 from collections.abc import Callable
 
+from pydantic import BaseModel
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
+from ai_lab.llm.cost import cost_usd
 from ai_lab.llm.gemini import generate_turn
 from ai_lab.llm.schemas import (
     AssistantTurn,
@@ -20,7 +22,27 @@ Handler = Callable[..., object]
 
 
 class ToolLoopError(Exception):
-    """The tool loop could not finish with an answer."""
+    """The tool loop could not finish with an answer.
+
+    `rounds` holds the usage of the model calls made before it gave up, so the cost
+    of a failed run is not lost.
+    """
+
+    def __init__(self, message: str, *, rounds: list[LLMResponse]) -> None:
+        super().__init__(message)
+        self.rounds = rounds
+
+
+class ToolRunResult(BaseModel):
+    history: list[Turn]
+    rounds: list[LLMResponse]  # one per model call, in order
+
+    def total_cost_usd(self) -> float | None:
+        """Cost of the whole question, or None if any round used an unpriced model."""
+        costs = [cost_usd(r) for r in self.rounds]
+        if any(c is None for c in costs):
+            return None
+        return sum(c for c in costs if c is not None)
 
 
 def run_tool(call: ToolCall, handlers: dict[str, Handler]) -> ToolResult:
@@ -50,21 +72,27 @@ def run_with_tools(
     *,
     generate: GenerateFn = generate_turn,
     max_steps: int = 5,
-) -> list[Turn]:
-    """Return the full history, ending with the model's final text answer."""
+) -> ToolRunResult:
+    """Run the loop; the result has the full history and the usage of every round."""
     history = list(turns)  # copy: never mutate the caller's list
+    rounds: list[LLMResponse] = []
     for _ in range(max_steps):
         turn, response = generate(history, tools)
+        rounds.append(response)
 
         # An empty turn must never enter the history: Gemini rejects it next round.
         if not turn.text and not turn.tool_calls:
-            raise ToolLoopError(f"empty reply, finish_reason={response.finish_reason}")
+            raise ToolLoopError(
+                f"empty reply, finish_reason={response.finish_reason}", rounds=rounds
+            )
         history.append(turn)
 
         if not turn.tool_calls:
-            return history  # final answer
+            return ToolRunResult(history=history, rounds=rounds)  # final answer
 
         results = [run_tool(call, handlers) for call in turn.tool_calls]
         history.append(ToolResultsTurn(results=results))
 
-    raise ToolLoopError(f"model still asking for tools after {max_steps} steps")
+    raise ToolLoopError(
+        f"model still asking for tools after {max_steps} steps", rounds=rounds
+    )

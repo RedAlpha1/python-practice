@@ -1,6 +1,9 @@
 import sys
+from pathlib import Path
 
-from ai_lab.llm import ask
+from ai_lab.llm import ask, log_usage_to
+
+log_usage_to(Path("data/llm_calls.jsonl"))
 
 question = "Explain RAG in 2 lines"
 max_tokens = int(sys.argv[1]) if len(sys.argv) > 1 else None

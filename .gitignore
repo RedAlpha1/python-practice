@@ -11,3 +11,6 @@ wheels/
 
 # Environment variables / secrets
 .env
+
+# Runtime usage log written by the scripts
+data/llm_calls.jsonl

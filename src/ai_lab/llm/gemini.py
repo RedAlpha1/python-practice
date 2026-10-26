@@ -32,6 +32,7 @@ from ai_lab.llm.schemas import (
     Turn,
     UserText,
 )
+from ai_lab.llm.usage import record
 from ai_lab.resilience import Timer
 
 _FINISH_MAP: dict[types.FinishReason, FinishReason] = {
@@ -132,7 +133,7 @@ def _make_response(
     latency_ms: int,
     first_token_ms: int | None,
 ) -> LLMResponse:
-    return LLMResponse(
+    response = LLMResponse(
         text=text,
         input_tokens=(usage.prompt_token_count or 0) if usage else 0,
         output_tokens=(usage.candidates_token_count or 0) if usage else 0,
@@ -142,6 +143,10 @@ def _make_response(
         latency_ms=latency_ms,
         first_token_ms=first_token_ms,
     )
+    # Every finished API call is built here, so this one line covers ask, chat,
+    # stream, generate_turn and ask_structured (even when its JSON turns out bad).
+    record(response)
+    return response
 
 
 def _model_name(model: str | None) -> str:

@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 from pydantic import BaseModel
 
+from ai_lab.llm import cost
 from ai_lab.llm.schemas import (
     AssistantTurn,
     LLMResponse,
@@ -15,21 +16,27 @@ from ai_lab.llm.schemas import (
 from ai_lab.llm.tools import GenerateFn, ToolLoopError, run_tool, run_with_tools
 
 
-def scripted(*replies: AssistantTurn) -> GenerateFn:
-    """A fake `generate` that plays the replies in order. No API call."""
+def scripted(*replies: AssistantTurn, model: str = "fake") -> GenerateFn:
+    """A fake `generate` that plays the replies in order. No API call.
+
+    Call number n reports latency_ms == n, so a test can tell the rounds apart.
+    """
     it = iter(replies)
+    n = 0
 
     def fake(
         turns: list[Turn], tools: list[ToolSpec]
     ) -> tuple[AssistantTurn, LLMResponse]:
+        nonlocal n
+        n += 1
         return next(it), LLMResponse(
             text="",
             input_tokens=0,
             output_tokens=0,
             thinking_tokens=0,
             finish_reason="stop",
-            model="fake",
-            latency_ms=0,
+            model=model,
+            latency_ms=n,
             first_token_ms=None,
         )
 
@@ -58,9 +65,13 @@ def last_results(history: list[Turn]):
     return turn.results
 
 
+def history_of(*args, **kwargs) -> list[Turn]:
+    return run_with_tools(*args, **kwargs).history
+
+
 # ── run_with_tools ────────────────────────────────────────────────────
 def test_plain_text_answer_is_two_turns():
-    history = run_with_tools(
+    history = history_of(
         QUESTION, [], HANDLERS, generate=scripted(AssistantTurn(text="Hi."))
     )
     assert [t.kind for t in history] == ["user", "assistant"]
@@ -71,7 +82,7 @@ def test_one_tool_call_then_text():
         AssistantTurn(tool_calls=[call("add", "c1", a=17, b=25)]),
         AssistantTurn(text="It is 42."),
     )
-    history = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+    history = history_of(QUESTION, [], HANDLERS, generate=generate)
 
     assert [t.kind for t in history] == [
         "user",
@@ -90,7 +101,7 @@ def test_two_calls_in_one_round_make_one_results_turn():
         ),
         AssistantTurn(text="3 and 30."),
     )
-    history = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+    history = history_of(QUESTION, [], HANDLERS, generate=generate)
 
     results_turns = [t for t in history if isinstance(t, ToolResultsTurn)]
     assert len(results_turns) == 1
@@ -105,7 +116,7 @@ def test_unknown_tool_becomes_error_result_not_crash():
         AssistantTurn(tool_calls=[call("get_weather", "c1", city="Pune")]),
         AssistantTurn(text="I have no weather tool."),
     )
-    history = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+    history = history_of(QUESTION, [], HANDLERS, generate=generate)
 
     [result] = last_results(history)
     assert result.output is None
@@ -119,7 +130,7 @@ def test_handler_exception_becomes_error_result():
         AssistantTurn(tool_calls=[call("boom", "c1")]),
         AssistantTurn(text="That failed."),
     )
-    history = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+    history = history_of(QUESTION, [], HANDLERS, generate=generate)
 
     [result] = last_results(history)
     assert result.error == "ZeroDivisionError: division by zero"
@@ -128,7 +139,7 @@ def test_handler_exception_becomes_error_result():
 def test_tool_calls_forever_raises_tool_loop_error():
     always = AssistantTurn(tool_calls=[call("add", "c1", a=1, b=1)])
     with pytest.raises(ToolLoopError, match="after 3 steps"):
-        run_with_tools(
+        history_of(
             QUESTION,
             [],
             HANDLERS,
@@ -145,13 +156,13 @@ def test_empty_reply_raises_and_is_not_added_to_history():
         return scripted(AssistantTurn())(turns, tools)
 
     with pytest.raises(ToolLoopError, match="empty reply, finish_reason=stop"):
-        run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+        history_of(QUESTION, [], HANDLERS, generate=generate)
     assert len(seen) == 1  # stopped at once, no second round with a bad turn
 
 
 def test_callers_turns_list_is_not_mutated():
     turns: list[Turn] = [UserText(text="hi")]
-    history = run_with_tools(
+    history = history_of(
         turns, [], HANDLERS, generate=scripted(AssistantTurn(text="Hello."))
     )
     assert len(turns) == 1
@@ -181,3 +192,80 @@ def test_unserializable_output_becomes_error_result():
     assert result.output is None
     assert result.error is not None
     assert "not JSON-serializable" in result.error
+
+
+# ── step 7: the usage of every round ──────────────────────────────────
+def test_one_round_for_a_plain_answer():
+    result = run_with_tools(
+        QUESTION, [], HANDLERS, generate=scripted(AssistantTurn(text="Hi."))
+    )
+    assert [r.latency_ms for r in result.rounds] == [1]
+
+
+def test_rounds_match_the_number_of_model_calls_in_order():
+    generate = scripted(
+        AssistantTurn(tool_calls=[call("add", "c1", a=1, b=2)]),
+        AssistantTurn(tool_calls=[call("add", "c2", a=3, b=4)]),
+        AssistantTurn(text="Done."),
+    )
+    result = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+
+    assert len(result.rounds) == 3
+    assert [r.latency_ms for r in result.rounds] == [1, 2, 3]  # in call order
+
+
+def test_two_calls_in_one_round_are_still_one_model_call():
+    generate = scripted(
+        AssistantTurn(
+            tool_calls=[call("add", "c1", a=1, b=2), call("add", "c2", a=3, b=4)]
+        ),
+        AssistantTurn(text="Done."),
+    )
+    result = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+
+    assert len(result.rounds) == 2  # two API calls, although three turns were added
+
+
+def test_failed_run_still_reports_the_rounds_it_used():
+    always = AssistantTurn(tool_calls=[call("add", "c1", a=1, b=1)])
+    with pytest.raises(ToolLoopError) as info:
+        run_with_tools(
+            QUESTION,
+            [],
+            HANDLERS,
+            generate=scripted(always, always, always),
+            max_steps=3,
+        )
+    assert len(info.value.rounds) == 3
+
+
+def test_empty_reply_error_includes_the_round_that_was_empty():
+    with pytest.raises(ToolLoopError) as info:
+        run_with_tools(QUESTION, [], HANDLERS, generate=scripted(AssistantTurn()))
+    assert len(info.value.rounds) == 1  # tokens were spent on that empty reply
+
+
+def test_total_cost_adds_up_the_rounds_of_a_known_model(monkeypatch):
+    monkeypatch.setattr(
+        cost, "PRICES", {"priced": cost.Price(input_per_m=2.0, output_per_m=10.0)}
+    )
+    generate = scripted(
+        AssistantTurn(tool_calls=[call("add", "c1", a=1, b=2)]),
+        AssistantTurn(text="3."),
+        model="priced",
+    )
+    result = run_with_tools(QUESTION, [], HANDLERS, generate=generate)
+    # give the two rounds known token counts, then check the sum by hand
+    result.rounds[0].input_tokens = 500_000
+    result.rounds[1].output_tokens = 100_000
+
+    assert result.total_cost_usd() == pytest.approx(
+        500_000 * 2 / 1e6 + 100_000 * 10 / 1e6
+    )
+
+
+def test_total_cost_is_none_if_any_round_is_unpriced():
+    result = run_with_tools(
+        QUESTION, [], HANDLERS, generate=scripted(AssistantTurn(text="Hi."))
+    )  # model "fake" has no price
+    assert result.total_cost_usd() is None

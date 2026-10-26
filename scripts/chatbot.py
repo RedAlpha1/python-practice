@@ -9,6 +9,7 @@ from ai_lab.llm import (
     LLMResponse,
     StreamDone,
     TextDelta,
+    log_usage_to,
     stream,
     to_message,
 )
@@ -16,6 +17,7 @@ from ai_lab.models import Conversation, append_conversation
 
 SYSTEM = "You are a concise assistant. Keep answers under 3 sentences."
 SESSIONS_PATH = Path("data/chat_sessions.jsonl")
+USAGE_PATH = Path("data/llm_calls.jsonl")
 HELP = "Commands: /reset clears the history, /exit saves the chat and quits."
 
 # Optional first argument: thinking budget in tokens (0 turns thinking off).
@@ -39,6 +41,7 @@ history: list[ChatMessage] = []
 turn = 0
 started_at = datetime.now()
 
+log_usage_to(USAGE_PATH)
 print(f"Chatbot ready. {HELP}")
 try:
     while True:
