@@ -1,0 +1,47 @@
+{"id" : "01", "text" : "Delivery Job Chaiye Pune mein", "intent" : "apply", "city" : "Pune", "split" : "dev"}
+{"id" : "02", "text" : "Salary Kitne milege bhai?", "intent" : "salary_query", "city" : null, "split" : "dev"}
+{"id" : "03", "text" : "Aadhar Upload nhi horha hai", "intent" : "documents", "city" : null, "split" : "dev"}
+{"id" : "04", "text" : "Bakwas service koi reply nhi krta", "intent" : "complaint", "city" : null, "split" : "dev"}
+{"id" : "05", "text" : "Bhai Bangalore me koi kaam milega kya?", "intent" : "apply", "city" : "Bengaluru", "split" : "dev"}
+{"id" : "06", "text" : "Mujhe Swiggy mein delivery boy banna hai", "intent" : "apply", "city" : null, "split" : "dev"}
+{"id" : "07", "text" : "Zomato ka job apply kaise kare", "intent" : "apply", "city" : null, "split" : "dev"}
+{"id" : "08", "text" : "Hyderabad me bike delivery ki vacancy hai?", "intent" : "apply", "city" : "Hyderabad", "split" : "dev"}
+{"id" : "09", "text" : "mere paas bike nahi hai, cycle se kaam kar sakta hu kya Delhi me", "intent" : "apply", "city" : "Delhi", "split" : "test"}
+{"id" : "10", "text" : "Warehouse job chahiye Noida side", "intent" : "apply", "city" : "Noida", "split" : "dev"}
+{"id" : "11", "text" : "Part time job milegi kya college ke baad", "intent" : "apply", "city" : null, "split" : "test"}
+{"id" : "12", "text" : "मुझे मुंबई में नौकरी चाहिए", "intent" : "apply", "city" : "Mumbai", "split" : "test"}
+{"id" : "13", "text" : "Bombay me driver ki job hai kya", "intent" : "apply", "city" : "Mumbai", "split" : "dev"}
+{"id" : "14", "text" : "Mera interview kab hai? Chennai wala", "intent" : "application_status", "city" : "Chennai", "note" : "already applied, asking about interview date: check existing application", "split" : "dev"}
+{"id" : "15", "text" : "Per order kitna paisa milta hai?", "intent" : "salary_query", "city" : null, "split" : "dev"}
+{"id" : "16", "text" : "Pune me Blinkit ki salary kitni hai", "intent" : "salary_query", "city" : "Pune", "split" : "dev"}
+{"id" : "17", "text" : "Weekly payment hota hai ya monthly?", "intent" : "salary_query", "city" : null, "split" : "test"}
+{"id" : "18", "text" : "Petrol ka paisa alag se milega?", "intent" : "salary_query", "city" : null, "split" : "dev"}
+{"id" : "19", "text" : "Joining bonus hai kya", "intent" : "salary_query", "city" : null, "split" : "dev"}
+{"id" : "20", "text" : "Mahine ka 20000 ban jayega kya Gurgaon me?", "intent" : "salary_query", "city" : "Gurugram", "note" : "Gurgaon normalised to official name Gurugram", "split" : "test"}
+{"id" : "21", "text" : "incentive kaise milta h", "intent" : "salary_query", "city" : null, "split" : "test"}
+{"id" : "22", "text" : "PAN card zaroori hai kya?", "intent" : "documents", "city" : null, "split" : "dev"}
+{"id" : "23", "text" : "Driving licence nahi hai abhi, sirf LL hai", "intent" : "documents", "city" : null, "split" : "test"}
+{"id" : "24", "text" : "Bank account details kaha daalu", "intent" : "documents", "city" : null, "note" : "entering bank details is submitting personal info: documents, even though it is for payment", "split" : "dev"}
+{"id" : "25", "text" : "Photo blur bol raha hai baar baar", "intent" : "documents", "city" : null, "split" : "dev"}
+{"id" : "26", "text" : "Aadhaar me address purana hai, chalega?", "intent" : "documents", "city" : null, "split" : "dev"}
+{"id" : "27", "text" : "Documents verify kab tak honge", "intent" : "application_status", "city" : null, "note" : "asking when verification finishes, not how to upload: status of existing application", "split" : "test"}
+{"id" : "28", "text" : "RC book bike ki bhai ke naam pe hai", "intent" : "documents", "city" : null, "split" : "test"}
+{"id" : "29", "text" : "3 din se call kar raha hu koi uthata nahi", "intent" : "complaint", "city" : null, "split" : "dev"}
+{"id" : "30", "text" : "Paise abhi tak nahi aaye, fraud hai kya", "intent" : "complaint", "city" : null, "split" : "dev"}
+{"id" : "31", "text" : "Kolkata office walo ne bahut wait karwaya", "intent" : "complaint", "city" : "Kolkata", "split" : "test"}
+{"id" : "32", "text" : "App baar baar crash ho raha hai", "intent" : "complaint", "city" : null, "split" : "dev"}
+{"id" : "33", "text" : "Jo salary boli thi usse kam di", "intent" : "complaint", "city" : null, "split" : "test"}
+{"id" : "34", "text" : "Recruiter ne rude baat ki", "intent" : "complaint", "city" : null, "split" : "dev"}
+{"id" : "35", "text" : "Pune me job chahiye par pehle batao salary kitni hai", "intent" : "salary_query", "city" : "Pune", "note" : "asking salary before applying: answer the question first", "split" : "dev"}
+{"id" : "36", "text" : "Aadhaar upload kar diya ab job kab milegi", "intent" : "application_status", "city" : null, "note" : "documents already uploaded, asking when job comes: status, not a new application", "split" : "dev"}
+{"id" : "37", "text" : "Document upload nahi ho raha, kitni baar try karu, bekaar app", "intent" : "documents", "city" : null, "note" : "upload failure is the actual problem; frustration alone does not make it a complaint", "split" : "test"}
+{"id" : "38", "text" : "Main Lucknow se hu, Delhi me kaam chahiye", "intent" : "apply", "city" : "Delhi", "note" : "two cities: city is where the job is wanted (Delhi), not where user lives", "split" : "test"}
+{"id" : "39", "text" : "salary nhi mili abhi tak 2 mahine ho gaye", "intent" : "complaint", "city" : null, "note" : "mentions salary but reports unpaid wages: complaint, not a salary question", "split" : "test"}
+{"id" : "40", "text" : "Jaipur", "intent" : "apply", "city" : "Jaipur", "note" : "bare city name in a job chat is a reply to 'which city?': treat as apply", "split" : "dev"}
+{"id" : "41", "text" : "hi", "intent" : "other", "city" : null, "split" : "dev"}
+{"id" : "42", "text" : "thank you bhai", "intent" : "other", "city" : null, "split" : "dev"}
+{"id" : "43", "text" : "aap insaan ho ya bot?", "intent" : "other", "city" : null, "split" : "test"}
+{"id" : "44", "text" : "Kal cricket match kaun jeetega", "intent" : "other", "city" : null, "split" : "test"}
+{"id" : "45", "text" : "ok", "intent" : "other", "city" : null, "note" : "bare acknowledgement: no intent, do not force into a class", "split" : "dev"}
+{"id" : "46", "text" : "Meri application ka kya hua?", "intent" : "application_status", "city" : null, "split" : "dev"}
+{"id" : "47", "text" : "Kal joining thi Pune me, confirm hua kya?", "intent" : "application_status", "city" : "Pune", "note" : "joining date already set: status check, not a new apply", "split" : "test"}
